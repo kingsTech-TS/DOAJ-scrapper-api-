@@ -22,17 +22,17 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
     base_url = "https://doaj.org/api/v2/search/articles/"
     results = []
 
-    # If no year range is provided, fetch normally
+    # --- No year filter (simple case) ---
     if not year_from or not year_to:
         query_str = f'(bibjson.subject.exact:"{query}" OR bibjson.keywords:"{query}" OR bibjson.title:"{query}")'
-        url = base_url + query_str
-        params = {"pageSize": size}
+        params = {"q": query_str, "pageSize": size, "page": 1}
 
         try:
-            response = requests.get(url, params=params, timeout=30)
+            response = requests.get(base_url, params=params, timeout=30)
             response.raise_for_status()
             data = response.json()
-        except Exception:
+        except Exception as e:
+            print("Error fetching DOAJ:", e)
             return []
 
         for record in data.get("results", []):
@@ -41,15 +41,15 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
             results.append({
                 "Journal": bibjson.get("journal", {}).get("title", ""),
                 "Title": bibjson.get("title", ""),
-                "Authors": ", ".join([a.get("name", "") for a in bibjson.get("author", [])]),
+                "Authors": ", ".join([a.get("name", "") for a in bibjson.get("author", []) if a.get("name")]),
                 "Year": int(bibjson.get("year", 0)) if str(bibjson.get("year", "")).isdigit() else 0,
                 "URL": bibjson.get("link", [{}])[0].get("url", "")
             })
 
         return results
 
-    # --- Year-by-year loop ---
-    for year in range(year_to, year_from - 1, -1):  # descending order
+    # --- Year-by-year loop (descending) ---
+    for year in range(year_to, year_from - 1, -1):
         page = 1
         while len(results) < size:
             query_str = (
@@ -58,14 +58,14 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
                 f'bibjson.title:"{query}") AND bibjson.year:{year}'
             )
 
-            url = base_url + query_str
-            params = {"pageSize": min(100, size - len(results)), "page": page}
+            params = {"q": query_str, "pageSize": min(100, size - len(results)), "page": page}
 
             try:
-                response = requests.get(url, params=params, timeout=30)
+                response = requests.get(base_url, params=params, timeout=30)
                 response.raise_for_status()
                 data = response.json()
-            except Exception:
+            except Exception as e:
+                print(f"Error fetching DOAJ for year {year}, page {page}:", e)
                 break
 
             records = data.get("results", [])
@@ -78,13 +78,13 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
                 results.append({
                     "Journal": bibjson.get("journal", {}).get("title", ""),
                     "Title": bibjson.get("title", ""),
-                    "Authors": ", ".join([a.get("name", "") for a in bibjson.get("author", [])]),
+                    "Authors": ", ".join([a.get("name", "") for a in bibjson.get("author", []) if a.get("name")]),
                     "Year": int(bibjson.get("year", 0)) if str(bibjson.get("year", "")).isdigit() else 0,
                     "URL": bibjson.get("link", [{}])[0].get("url", "")
                 })
 
                 if len(results) >= size:
-                    break  # reached target count
+                    break  # stop once we reach the target
 
             page += 1
 
