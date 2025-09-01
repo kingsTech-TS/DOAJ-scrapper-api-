@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 import requests
-import pandas as pd
 from typing import Optional, List
 
 app = FastAPI(title="DOAJ Article Search API", version="1.0.0")
@@ -11,7 +10,7 @@ class Article(BaseModel):
     Journal: str
     Title: str
     Authors: str
-    Year: str
+    Year: int
     URL: str
 
 
@@ -35,7 +34,7 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
-    except Exception as e:
+    except Exception:
         return []
 
     results = []
@@ -48,8 +47,11 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
         # Authors
         authors = ", ".join([a.get("name", "") for a in bibjson.get("author", [])])
 
-        # Year
-        year = bibjson.get("year", "")
+        # Year (ensure integer, fallback to 0 if missing/invalid)
+        try:
+            year = int(bibjson.get("year", 0))
+        except (ValueError, TypeError):
+            year = 0
 
         # Journal name
         journal = bibjson.get("journal", {}).get("title", "")
@@ -65,6 +67,9 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
             "Year": year,
             "URL": url_link
         })
+
+    # --- Sort results by latest year first ---
+    results.sort(key=lambda x: x["Year"], reverse=True)
 
     return results
 
@@ -85,4 +90,6 @@ def api_search(
 
 @app.get("/")
 def root():
-    return {"message": "Welcome to DOAJ Article Search API! Use /search?query=topic&year_from=2021&year_to=2025"}
+    return {
+        "message": "Welcome to DOAJ Article Search API! Use /search?query=topic&year_from=2021&year_to=2025"
+    }
