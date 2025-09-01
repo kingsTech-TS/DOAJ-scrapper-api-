@@ -16,60 +16,77 @@ class Article(BaseModel):
 
 def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[int] = None, size: int = 20):
     """
-    Search DOAJ API for articles by exact subject/title/keywords and optional year filter
+    Search DOAJ API for articles by exact subject/title/keywords.
+    Ensures results are collected year by year in descending order.
     """
     base_url = "https://doaj.org/api/v2/search/articles/"
-
-    # --- Enhanced query ---
-    query_str = f'(bibjson.subject.exact:"{query}" OR bibjson.keywords:"{query}" OR bibjson.title:"{query}")'
-
-    # Add year filter
-    if year_from and year_to:
-        query_str += f" AND bibjson.year:[{year_from} TO {year_to}]"
-
-    url = base_url + query_str
-    params = {"pageSize": size}
-
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-    except Exception:
-        return []
-
     results = []
-    for record in data.get("results", []):
-        bibjson = record.get("bibjson", {})
 
-        # Article title
-        title = bibjson.get("title", "")
+    # If no year range is provided, fetch normally
+    if not year_from or not year_to:
+        query_str = f'(bibjson.subject.exact:"{query}" OR bibjson.keywords:"{query}" OR bibjson.title:"{query}")'
+        url = base_url + query_str
+        params = {"pageSize": size}
 
-        # Authors
-        authors = ", ".join([a.get("name", "") for a in bibjson.get("author", [])])
-
-        # Year (ensure integer, fallback to 0 if missing/invalid)
         try:
-            year = int(bibjson.get("year", 0))
-        except (ValueError, TypeError):
-            year = 0
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            return []
 
-        # Journal name
-        journal = bibjson.get("journal", {}).get("title", "")
+        for record in data.get("results", []):
+            bibjson = record.get("bibjson", {})
 
-        # Article URL (or DOI if available)
-        links = bibjson.get("link", [])
-        url_link = links[0].get("url") if links else ""
+            results.append({
+                "Journal": bibjson.get("journal", {}).get("title", ""),
+                "Title": bibjson.get("title", ""),
+                "Authors": ", ".join([a.get("name", "") for a in bibjson.get("author", [])]),
+                "Year": int(bibjson.get("year", 0)) if str(bibjson.get("year", "")).isdigit() else 0,
+                "URL": bibjson.get("link", [{}])[0].get("url", "")
+            })
 
-        results.append({
-            "Journal": journal,
-            "Title": title,
-            "Authors": authors,
-            "Year": year,
-            "URL": url_link
-        })
+        return results
 
-    # --- Sort results by latest year first ---
-    results.sort(key=lambda x: x["Year"], reverse=True)
+    # --- Year-by-year loop ---
+    for year in range(year_to, year_from - 1, -1):  # descending order
+        page = 1
+        while len(results) < size:
+            query_str = (
+                f'(bibjson.subject.exact:"{query}" OR '
+                f'bibjson.keywords:"{query}" OR '
+                f'bibjson.title:"{query}") AND bibjson.year:{year}'
+            )
+
+            url = base_url + query_str
+            params = {"pageSize": min(100, size - len(results)), "page": page}
+
+            try:
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+            except Exception:
+                break
+
+            records = data.get("results", [])
+            if not records:
+                break  # no more results for this year
+
+            for record in records:
+                bibjson = record.get("bibjson", {})
+
+                results.append({
+                    "Journal": bibjson.get("journal", {}).get("title", ""),
+                    "Title": bibjson.get("title", ""),
+                    "Authors": ", ".join([a.get("name", "") for a in bibjson.get("author", [])]),
+                    "Year": int(bibjson.get("year", 0)) if str(bibjson.get("year", "")).isdigit() else 0,
+                    "URL": bibjson.get("link", [{}])[0].get("url", "")
+                })
+
+                if len(results) >= size:
+                    break  # reached target count
+
+            page += 1
 
     return results
 
