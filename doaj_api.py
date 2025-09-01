@@ -19,7 +19,7 @@ def search_doaj(query: str, year_from: Optional[int] = None, year_to: Optional[i
     Search DOAJ API for articles by exact subject/title/keywords.
     Ensures results are collected year by year in descending order.
     """
-    base_url = "https://doaj.org/api/v2/search/articles/"
+    base_url = "https://doaj.org/api/v2/search/articles"  # ✅ fixed (no trailing /)
     results = []
 
     # --- No year filter (simple case) ---
